@@ -99,9 +99,11 @@ using namespace Glucose;
 #else
 #define LOG(...) \
   do {} while (0);
-#define LOGLIT(A) \
+#define LOGLIT(...) \
   
-#define LOGCLAUSE(A) \
+#define LOGCLAUSE(...) \
+
+#define ASSERT(A)                                                              \
   
 #endif
 
