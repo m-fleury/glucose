@@ -60,17 +60,18 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 using namespace Glucose;
 
 #ifdef DEBUG
+#define LOGGING opt_logging
 #define LOG(...)                                                               \
-  do {                                                                         \
+  if (LOGGING) {                                                                         \
     printf("c LOG %d ", decisionLevel());                                      \
     printf(__VA_ARGS__);                                                       \
     printf("\n");                                                              \
-  } while (false);
+  } 
 
 #define LOGLIT(A) \
   value ((A)) == l_True ? "=1" : (value ((A)) == l_False ? "=-1" : "")
 #define LOGCLAUSE(A, ...)                                                      \
-  do {                                                                         \
+  if (LOGGING) do {                                                                         \
     printf("c LOG %d ", decisionLevel());                                      \
     printf(__VA_ARGS__);                                                       \
     if ((A) == CRef_Undef) {                                                   \
@@ -89,7 +90,7 @@ using namespace Glucose;
              LOGLIT(c[i]));                                                    \
     }                                                                          \
     printf("\n");                                                              \
-  } while (false);
+  } while (false)
 #define ASSERT(A)                                                              \
   if (!(A)) {                                                                  \
     fflush(stdout);                                                            \
@@ -118,6 +119,8 @@ static const char *_cr = "CORE -- RESTART";
 static const char *_cred = "CORE -- REDUCE";
 static const char *_cm = "CORE -- MINIMIZE";
 
+
+static BoolOption opt_logging(_cm, "log", "produce logs", false);
 
 static DoubleOption opt_K(_cr, "K", "The constant used to force restart", 0.8, DoubleRange(0, false, 1, false));
 static DoubleOption opt_R(_cr, "R", "The constant used to block restart", 1.4, DoubleRange(1, false, 5, false));
@@ -1445,6 +1448,7 @@ void Solver::reduceDB() {
   for (int i = 0; i < trail.size(); ++i) {
     Var x = var (trail[i]);
     if (missed_implication(x) != CRef_Undef && missed_implication(x) != CRef_Unit) {
+      LOGCLAUSE (missed_implication(x), "unprotecting missed reason");
       ASSERT (ca[missed_implication(x)].isMissed());
       ca[missed_implication(x)].setMissed(false);
     }

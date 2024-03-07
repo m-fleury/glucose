@@ -163,7 +163,7 @@ class Clause {
       unsigned learnt     : 1;
       unsigned canbedel   : 1;
       unsigned ismissed   : 1;
-      unsigned extra_size : 1; // extra size (end of 32bits) 0..3       
+      unsigned extra_size : 3; // extra size (end of 32bits) 0..3       
       unsigned seen       : 1;
       unsigned reloced    : 1;
       unsigned exported   : 2; // Values to keep track of the clause status for exportations
@@ -194,6 +194,7 @@ class Clause {
         header.size      = ps.size();
 	header.lbd = 0;
 	header.canbedel = 1;
+	header.ismissed = 0;
 	header.exported = 0; 
 	header.oneWatched = 0;
     header.simplified = 0;
