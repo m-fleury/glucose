@@ -915,7 +915,7 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
 	    LOG ("problem is unsat");
 	    return;
 	  }
-	  printf("\n");
+	  // printf("\n");
           pathC = 0; // UIP is on highest level
           for (int i = 1; i < analyze_toclear.size(); ++i) {
                 Lit l = analyze_toclear[i];
