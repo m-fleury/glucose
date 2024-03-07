@@ -287,10 +287,22 @@ protected:
     bool randomize_on_restarts, fixed_randomize_on_restarts, newDescent;
     uint32_t randomDescentAssignments;
     bool forceUnsatOnNewDescent;
+    bool strongBacktrack;
     // Helper structures:
     //
-    struct VarData { CRef reason; int level; };
-    static inline VarData mkVarData(CRef cr, int l){ VarData d = {cr, l}; return d; }
+    struct VarData { CRef reason; int level; CRef missed_implication; int missed_level; };
+    static inline VarData mkVarData(CRef cr, int l, CRef missed, int missed_lev){ VarData d = {cr, l, missed, missed_lev}; return d; }
+  static inline VarData mkVarData(CRef cr, int l){ VarData d = {cr, l, CRef_Undef, 0}; return d; }
+  inline bool isValidBlocker(Lit l, int propLevel) {
+    if (!strongBacktrack)
+      return true;
+    Var x = var(l);
+    int blit_lev = level(x);
+    CRef missed = missed_implication(x);
+    int blit_missed_level = missed_level(x);
+    return blit_lev <= propLevel ||
+           (missed != CRef_Undef && blit_missed_level > propLevel);
+  }
 
     struct Watcher {
         CRef cref;
@@ -452,6 +464,8 @@ protected:
     uint32_t abstractLevel    (Var x) const; // Used to represent an abstraction of sets of decision levels.
     CRef     reason           (Var x) const;
     int      level            (Var x) const;
+    CRef     missed_implication(Var x) const;
+    int      missed_level     (Var x) const;
     double   progressEstimate ()      const; // DELETE THIS ?? IT'S NOT VERY USEFUL ...
     bool     withinBudget     ()      const;
     inline bool isSelector(Var v) {return (incremental && v>nbVarsInitialFormula);}
@@ -506,6 +520,8 @@ public:
 
 inline CRef Solver::reason(Var x) const { return vardata[x].reason; }
 inline int  Solver::level (Var x) const { return vardata[x].level; }
+inline CRef Solver::missed_implication(Var x) const { return vardata[x].missed_implication; }
+inline int  Solver::missed_level (Var x) const { return vardata[x].missed_level; }
 
 inline void Solver::insertVarOrder(Var x) {
     if (!order_heap.inHeap(x) && decision[x]) order_heap.insert(x); }

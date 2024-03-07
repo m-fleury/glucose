@@ -48,7 +48,7 @@ libr:	lib$(LIB)_release.a
 ## Link options
 $(EXEC):		LFLAGS += -g
 $(EXEC)_profile:	LFLAGS += -g -pg
-$(EXEC)_debug:		LFLAGS += -g
+$(EXEC)_debug:		LFLAGS += -g -fsanitize=undefined -fsanitize=address
 #$(EXEC)_release:	LFLAGS += ...
 $(EXEC)_static:		LFLAGS += --static
 
@@ -87,7 +87,6 @@ libs libp libd libr:
 
 ## Clean rule
 allclean: clean
-	
 	@rm -f ../simp/*.o ../simp/*.or ../simp/*.od  ../core/*.o ../core/*.or ../core/*.od
 clean:
 	rm -f $(EXEC) $(EXEC)_profile $(EXEC)_debug $(EXEC)_release $(EXEC)_static \

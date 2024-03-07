@@ -48,7 +48,9 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
  **************************************************************************************************/
 
 #include <math.h>
+#include <iostream>
 
+#include "core/SolverTypes.h"
 #include "utils/System.h"
 #include "mtl/Sort.h"
 #include "core/Solver.h"
@@ -57,6 +59,48 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 using namespace Glucose;
 
+#ifdef DEBUG
+#define LOG(...)                                                               \
+  printf("c LOG %d ", decisionLevel());                                        \
+  do {                                                                         \
+    printf(__VA_ARGS__);                                                       \
+  } while (false);                                                             \ 
+  printf("\n");
+#define LOGLIT(A) \
+  value ((A)) == l_True ? "=1" : (value ((A)) == l_False ? "=-1" : "")
+#define LOGCLAUSE(A, ...)                                                      \
+  printf("c LOG %d ", decisionLevel());                                        \
+  do {                                                                         \
+    printf(__VA_ARGS__);                                                       \
+    if ((A) == CRef_Undef) {                                                   \
+      printf(" undef\n");                                                      \
+      break;                                                                   \
+    }                                                                          \
+    if ((A) == CRef_Unit) {                                                    \
+      printf(" unit\n");                                                       \
+      break;                                                                   \
+    }                                                                          \
+    printf(" clause [%d]", (A));                                                \
+    const Clause &c = ca[(A)];                                                 \
+    for (int i = 0; i < c.size(); ++i) {                                       \
+      printf(" %s%d@%d%s", sign(c[i]) ? "+" : "-", var(c[i]),                  \
+             level(var(c[i])), LOGLIT(c[i]));                                  \
+    }                                                                          \
+    printf("\n");                                                              \
+  } while (false);
+#define ASSERT(A)                                                              \
+  if (!(A)) {                                                                  \
+    fflush(stdout);                                                            \
+    assert (A); \
+  }
+#else
+#define LOG(#1) \
+  do {} while (0);
+#define LOGLIT(A) \
+  
+#define LOGCLAUSE(A) \
+  
+#endif
 
 //=================================================================================================
 // Statistics
@@ -118,6 +162,7 @@ static BoolOption opt_fixed_randomize_phase_on_restarts(_cat, "fix-phas-rest", "
 static BoolOption opt_adapt(_cat, "adapt", "Adapt dynamically stategies after 100000 conflicts", true);
 
 static BoolOption opt_forceunsat(_cat,"forceunsat","Force the phase for UNSAT",true);
+static BoolOption opt_strongbacktrack(_cat,"strongbt","Activate strong backtracking",false);
 //=================================================================================================
 // Constructor/Destructor:
 
@@ -170,6 +215,7 @@ verbosity(0)
 , newDescent(0)
 , randomDescentAssignments(0)
 , forceUnsatOnNewDescent(opt_forceunsat)
+, strongBacktrack (opt_strongbacktrack)
 
 , ok(true)
 , cla_inc(1)
@@ -406,7 +452,7 @@ Var Solver::newVar(bool sign, bool dvar) {
 
 
 bool Solver::addClause_(vec <Lit> &ps) {
-
+  
     assert(decisionLevel() == 0);
     if(!ok) return false;
 
@@ -448,7 +494,6 @@ bool Solver::addClause_(vec <Lit> &ps) {
         CRef cr = ca.alloc(ps, false);
         clauses.push(cr);
         attachClause(cr);
-
     }
 
     return true;
@@ -522,7 +567,7 @@ void Solver::detachClausePurgatory(CRef cr, bool strict) {
 
 
 void Solver::removeClause(CRef cr, bool inPurgatory) {
-
+    LOGCLAUSE(cr, "deleting clause");
     Clause &c = ca[cr];
 
     if(certifiedUNSAT) {
@@ -602,22 +647,44 @@ void Solver::minimisationWithBinaryResolution(vec <Lit> &out_learnt) {
 // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
 //
 
-void Solver::cancelUntil(int level) {
-    if(decisionLevel() > level) {
-        for(int c = trail.size() - 1; c >= trail_lim[level]; c--) {
-            Var x = var(trail[c]);
-            assigns[x] = l_Undef;
-            if(phase_saving > 1 || ((phase_saving == 1) && c > trail_lim.last())) {
-                polarity[x] = sign(trail[c]);
+void Solver::cancelUntil(int new_level) {
+  LOG ("backtracking to level %d", new_level);
+  if(decisionLevel() > new_level) {
+        int j = trail_lim[new_level];
+        for (int c = trail_lim[new_level];
+             c != trail.size(); ++c) {
+            Lit l = trail[c];
+            Var x = var(l);
+            ASSERT(level(x) >= new_level || !level (x));
+	    if (!level (x)) {
+	      LOG ("reassigning %s%d", sign (l) ? "" : "-", x);
+                trail[j++] = l;
+	    } else if (missed_implication(x) != CRef_Undef && missed_level(x) <= new_level) {
+	        ASSERT (strongBacktrack);
+                trail[j++] = l;
+		if (missed_level(x) == new_level)
+                  vardata[x] = mkVarData(new_level ? missed_implication(x) : CRef_Undef, decisionLevel());
+		else {
+                  vardata[x] = mkVarData(missed_implication(x), decisionLevel(),
+					 missed_implication(x), missed_level(x));
+		  LOG ("reassigning %s%d", sign (l) ? "" : "-", x);
+		}
+            } else {
+                assigns[x] = l_Undef;
+	        vardata[x].missed_implication = CRef_Undef;
+                if (phase_saving > 1 ||
+                    ((phase_saving == 1) && c > trail_lim.last())) {
+                    polarity[x] = sign(trail[c]);
+                }
+                insertVarOrder(x);
             }
-            insertVarOrder(x);
         }
-        qhead = trail_lim[level];
-        trail.shrink(trail.size() - trail_lim[level]);
-        trail_lim.shrink(trail_lim.size() - level);
-    }
+	ASSERT (strongBacktrack || j == trail_lim[new_level]);
+        qhead = trail_lim[new_level];
+        trail.shrink(trail.size() - j);
+        trail_lim.shrink(trail_lim.size() - new_level);
+  }
 }
-
 
 //=================================================================================================
 // Major methods:
@@ -674,7 +741,7 @@ Lit Solver::pickBranchLit() {
 |      * Current decision level must be greater than root level.
 |
 |    Post-conditions:
-|      * 'out_learnt[0]' is the asserting literal at level 'out_btlevel'.
+|      * 'out_learnt[0]' is the ASSERTing literal at level 'out_btlevel'.
 |      * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
 |        rest of literals. There may be others from the same level though.
 |
@@ -683,13 +750,38 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
     int pathC = 0;
     Lit p = lit_Undef;
 
+    LOGCLAUSE(confl, "analyzing conflict");
+    if (strongBacktrack) {
+        ASSERT(confl != CRef_Undef); // (otherwise should be UIP)
+        Clause &c = ca[confl];
+        int lev = 0;
+	int count = 0;
+        for (int i = 0; i < c.size(); ++i) {
+            const Lit l = c[i];
+            const Var x = var(l);
+            const int x_lev = level(x);
+            if (x_lev > lev)
+              lev = x_lev, count = 0;
+	    if (x_lev == lev)
+	      ++count;
+        }
+	LOG ("found %d literals on highest level", count);
+	ASSERT (strongBacktrack || lev);
+        if (!lev) {
+	  LOG ("found conflict at level 0: unsat");
+	  cancelUntil(0);
+	  return;
+	}
+	if (lev != decisionLevel ())
+	  cancelUntil (lev);
+    }
 
     // Generate conflict clause:
     //
     out_learnt.push(); // (leave room for the asserting literal)
     int index = trail.size() - 1;
     do {
-        assert(confl != CRef_Undef); // (otherwise should be UIP)
+        ASSERT(confl != CRef_Undef); // (otherwise should be UIP)
         Clause &c = ca[confl];
         // Special case for binary clauses
         // The first one has to be SAT
@@ -731,12 +823,14 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
         }
 
 
+        LOGCLAUSE (confl, "resolving with");
         for(int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++) {
             Lit q = c[j];
 
             if(!seen[var(q)]) {
                 if(level(var(q)) == 0) {
                 } else { // Here, the old case
+		  assert (value (q) == l_False || q == p);
                     if(!isSelector(var(q)))
                         varBumpActivity(var(q));
 
@@ -745,7 +839,9 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
                     bumpForceUNSAT(~q); // Negation because q is false here
 
                     seen[var(q)] = 1;
+		    ASSERT (level(var(q)) <= decisionLevel());
                     if(level(var(q)) >= decisionLevel()) {
+  		        LOG ("lit found on current level %s%d", sign (q) ? "+" : "-", var (q));
                         pathC++;
                         // UPDATEVARACTIVITY trick (see competition'09 companion paper)
                         if(!isSelector(var(q)) && (reason(var(q)) != CRef_Undef) && ca[reason(var(q))].learnt())
@@ -761,9 +857,13 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
             } //else stats[sumResSeen]++;
         }
 
+	LOG ("open = %d ", pathC);
         // Select next clause to look at:
-        while (!seen[var(trail[index--])]);
+        while (!seen[var(trail[index--])]) {
+	  LOG ("skipping over var %d", var (trail [index + 1]));
+	};
         p = trail[index + 1];
+      	LOG ("resolving on %s%d", sign (p) ? "+" : "-", var (p));
         //stats[sumRes]++;
         confl = reason(var(p));
         seen[var(p)] = 0;
@@ -950,10 +1050,31 @@ void Solver::analyzeFinal(Lit p, vec <Lit> &out_conflict) {
 
 
 void Solver::uncheckedEnqueue(Lit p, CRef from) {
-    assert(value(p) == l_Undef);
+    LOG ("setting %s%d%s with reason clause %d on level %d", sign (p) ? "+" : "-", var (p), LOGLIT (p), (int)from, decisionLevel());
+    LOGCLAUSE (from, "with reason");
+  assert(value(p) == l_Undef);
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
+    if (from == CRef_Unit) {
+      vardata[var (p)].level = 0;
+      vardata[var (p)].missed_level = 0;
+      vardata[var (p)].missed_implication = from;
+      return;
+    }
+    if (from != CRef_Undef) {
+      const Clause &c = ca[from];
+      Lit l = c[0]  == p ? c[1] : c[0];
+      ASSERT (l != p);
+      if (level (var (l)) != decisionLevel()) {
+	LOG ("found out-of-order %s%d", sign (p) ? "" : "-", var (p));
+	vardata[var (p)].missed_level = level (var (p));
+	vardata[var (p)].missed_implication = from;
+      }
+      for (int i = 0; i < c.size(); ++i)
+        ASSERT (c[i] == p || value (c[i])== l_False);
+    }
+
 }
 
 
@@ -982,6 +1103,9 @@ CRef Solver::propagate() {
     unaryWatches.cleanAll();
     while(qhead < trail.size()) {
         Lit p = trail[qhead++]; // 'p' is enqueued fact to propagate.
+	ASSERT(value(p) == l_True);
+        const int propLevel = level (var (p));
+	LOG ("propagating %d @ %d on level %d", var (p), propLevel, decisionLevel());
         vec <Watcher> &ws = watches[p];
         Watcher *i, *j, *end;
         num_props++;
@@ -1000,13 +1124,24 @@ CRef Solver::propagate() {
             if(value(imp) == l_Undef) {
                 uncheckedEnqueue(imp, wbin[k].cref);
             }
+
+	    Var x = var (imp);
+	    CRef missed = missed_implication(x);
+	    const bool replacing = !isValidBlocker (imp, propLevel);
+	    ASSERT (strongBacktrack || missed == CRef_Undef);
+	    if (value (imp) == l_True && strongBacktrack && replacing) {
+	      vardata[x].missed_implication = wbin[k].cref;
+	      vardata[x].missed_level = propLevel;
+	      LOG ("found missed %s%d", sign (imp) ? "+" : "-", var (imp));
+	    }
         }
 
         // Now propagate other 2-watched clauses
         for(i = j = (Watcher *) ws, end = i + ws.size(); i != end;) {
             // Try to avoid inspecting the clause:
             Lit blocker = i->blocker;
-            if(value(blocker) == l_True) {
+	    ASSERT (p != blocker);
+            if(value(blocker) == l_True && isValidBlocker (blocker, propLevel)) {
                 *j++ = *i++;
                 continue;
             }
@@ -1018,17 +1153,18 @@ CRef Solver::propagate() {
             Lit false_lit = ~p;
             if(c[0] == false_lit)
                 c[0] = c[1], c[1] = false_lit;
-            assert(c[1] == false_lit);
+            ASSERT(c[1] == false_lit);
             i++;
 
             // If 0th watch is true, then clause is already satisfied.
             Lit first = c[0];
             Watcher w = Watcher(cr, first);
-            if(first != blocker && value(first) == l_True) {
-
+            if(first != blocker && value(first) == l_True && isValidBlocker(first, propLevel)) {
                 *j++ = w;
                 continue;
             }
+	    int replacement_level = propLevel;
+	    int highest_pos = 0;
 #ifdef INCREMENTAL
             if(incremental) { // ----------------- INCREMENTAL MODE
               int choosenPos = -1;
@@ -1055,10 +1191,14 @@ CRef Solver::propagate() {
             } else {  // ----------------- DEFAULT  MODE (NOT INCREMENTAL)
 #endif
             for(int k = 2; k < c.size(); k++) {
-
+		if (level (var (c[k])) > replacement_level) {
+		  replacement_level = level (var (c[k]));
+		  highest_pos = k;
+		}
                 if(value(c[k]) != l_False) {
                     c[1] = c[k];
                     c[k] = false_lit;
+		    LOGCLAUSE (cr, "rewatch on var %d", var (c[1]));
                     watches[~c[1]].push(w);
                     goto NextClause;
                 }
@@ -1066,18 +1206,44 @@ CRef Solver::propagate() {
 #ifdef INCREMENTAL
             }
 #endif
+            if (strongBacktrack && value (first) == l_True) {
+	      Lit l = c[highest_pos];
+	      c[highest_pos] = first;
+	      c[1] = l;
+	      LOGCLAUSE (cr, "rewatch on var %d", var (c[1]));
+              Watcher w = Watcher(cr, l);
+              watches[~c[1]].push(w);
+	      Var x = var (l);
+	      const bool replacing_missed = !missed_implication(x) || missed_level (x) > replacement_level;
+	      if (level (var (l)) > replacement_level && replacing_missed) {
+		vardata[x].missed_implication = cr;
+		vardata[x].missed_level = replacement_level;
+	      LOG ("found missed %s%d", sign (l) ? "+" : "-", var (l));
+	      }
+              goto NextClause;
+	    }
             // Did not find watch -- clause is unit under assignment:
-            *j++ = w;
             if(value(first) == l_False) {
+                *j++ = w;
                 confl = cr;
                 qhead = trail.size();
                 // Copy the remaining watches:
                 while(i < end)
                     *j++ = *i++;
             } else {
+	      // fix WL
+	      if  (strongBacktrack && c[highest_pos] != first && c[highest_pos] != c[1]) {
+  		  c[0] = first;
+		  c[1] = c[highest_pos];
+		  c[highest_pos] = false_lit;
+		  LOGCLAUSE (cr, "rewatch on var %d", var (c[1]));
+		  Watcher w = Watcher(cr, first);
+                  watches[~c[1]].push(w);
+		  uncheckedEnqueue(first, cr);
+		  goto NextClause;
+		}
+		*j++ = w;
                 uncheckedEnqueue(first, cr);
-
-
             }
             NextClause:;
         }
@@ -1510,11 +1676,19 @@ lbool Solver::search(int nof_conflicts) {
 
             analyze(confl, learnt_clause, selectors, backtrack_level, nblevels, szWithoutSelectors);
 
+            if(decisionLevel() == 0) {
+  	        ASSERT (strongBacktrack);
+                return l_False;
+            }
+
             stats[sumSizes]+= learnt_clause.size();
             lbdQueue.push(nblevels);
             sumLBD += nblevels;
 
-            cancelUntil(backtrack_level);
+	    if (strongBacktrack)
+              cancelUntil(decisionLevel() - 1);
+	    else
+              cancelUntil(backtrack_level);
 
             if(certifiedUNSAT)
                 addToDrat(learnt_clause, true);
@@ -1522,7 +1696,8 @@ lbool Solver::search(int nof_conflicts) {
 
 
             if(learnt_clause.size() == 1) {
-                uncheckedEnqueue(learnt_clause[0]);
+  	        LOG ("found unit");
+                uncheckedEnqueue(learnt_clause[0], strongBacktrack ? CRef_Unit : CRef_Undef);
                 stats[nbUn]++;
                 parallelExportUnaryClause(learnt_clause[0]);
             } else {
@@ -1625,6 +1800,7 @@ lbool Solver::search(int nof_conflicts) {
             // Increase decision level and enqueue 'next'
             aDecisionWasMade = true;
             newDecisionLevel();
+	    LOG ("deciding %s%d", sign (next) ? "+" : "-", var (next));
             uncheckedEnqueue(next);
         }
     }

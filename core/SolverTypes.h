@@ -287,6 +287,7 @@ public:
 
 
     const CRef CRef_Undef = RegionAllocator<uint32_t>::Ref_Undef;
+    const CRef CRef_Unit = RegionAllocator<uint32_t>::Ref_Unit;
     class ClauseAllocator : public RegionAllocator<uint32_t>
     {
         static int clauseWord32Size(int size, int extra_size){
