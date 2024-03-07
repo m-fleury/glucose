@@ -837,7 +837,7 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
             Lit q = c[j];
 
             if(!seen[var(q)]) {
-              if(level(var(q)) == 0 || (false && missed_implication(var (q)) != CRef_Undef && missed_level (var (q)) == 0)) {
+              if(level(var(q)) == 0 || (missed_implication(var (q)) == CRef_Unit)) {
                 } else { // Here, the old case
 		  assert (value (q) == l_False || q == p);
                     if(!isSelector(var(q)))
@@ -874,9 +874,68 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
         p = trail[index + 1];
       	LOG ("resolving on %s%d", sign (p) ? "+" : "-", var (p));
         //stats[sumRes]++;
-        confl = reason(var(p));
+        if (missed_implication(var(p)) != CRef_Undef &&
+            missed_implication(var(p)) != CRef_Unit)
+          confl = missed_implication(var(p));
+        else
+          confl = reason(var(p));
         seen[var(p)] = 0;
         pathC--;
+
+        if (!pathC && missed_implication(var(p)) != CRef_Undef && missed_level(var (p)) &&
+            out_learnt.size() != 1) {
+	  LOGCLAUSE (missed_implication(var (p)), "could resolve with ");
+          out_learnt[0] = ~p;
+          out_learnt.copyTo(analyze_toclear);
+          out_learnt.clear();
+          out_learnt.push(); // make space again
+          for (int j = 0; j < analyze_toclear.size(); j++)
+                seen[var(analyze_toclear[j])] = 0;
+          int highest_level = 0;
+          for (int i = 1; i < analyze_toclear.size(); ++i) {
+                const int lev = level(var(analyze_toclear[i]));
+                if (lev > highest_level)
+                    highest_level = lev;
+          }
+	  const Clause&c = ca[missed_implication(var (p))];
+          for (int i = 1; i < c.size(); ++i) {
+            const int lev = level(var(c[i]));
+	    analyze_toclear.push (c[i]);
+            if (lev > highest_level)
+              highest_level = lev;
+          }
+          ASSERT(highest_level < decisionLevel());
+          confl = missed_implication(var(p));
+          cancelUntil(highest_level);
+	  // printf ("c conflict: ");
+          // for (int i = 0; i < analyze_toclear.size(); ++i) {
+	  //   printf (" %d", var (analyze_toclear[i]));
+          // }
+	  if (!highest_level) {
+	    LOG ("problem is unsat");
+	    return;
+	  }
+	  printf("\n");
+          pathC = 0; // UIP is on highest level
+          for (int i = 1; i < analyze_toclear.size(); ++i) {
+                Lit l = analyze_toclear[i];
+                const int lev = level(var(l));
+		if (!lev || missed_implication(var (l)) == CRef_Unit)
+		  continue;
+                if(seen[var(l)])
+		  continue;
+                seen[var(l)] = 1;
+                if (lev == highest_level) {
+  		  LOG ("lit found on current level %s%d", sign (l) ? "+" : "-", var (l));
+                    pathC++;
+                } else{
+  		  LOG ("lit found on lower level %s%d", sign (l) ? "+" : "-", var (l));
+                  out_learnt.push(l);
+		}
+          }
+	  analyze_toclear.clear();
+	  lastDecisionLevel.clear();
+        }
 
     } while(pathC > 0);
     out_learnt[0] = ~p;
