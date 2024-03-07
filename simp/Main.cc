@@ -264,7 +264,7 @@ int main(int argc, char** argv)
 
         if (S.verbosity > 0){
             printStats(S);
-            printf("\n"); }
+            printf("c\n"); }
         printf(ret == l_True ? "s SATISFIABLE\n" : ret == l_False ? "s UNSATISFIABLE\n" : "s INDETERMINATE\n");
 
         if (res != NULL){
