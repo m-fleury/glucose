@@ -1797,7 +1797,7 @@ lbool Solver::search(int nof_conflicts) {
             lbdQueue.push(nblevels);
             sumLBD += nblevels;
 
-	    if (strongBacktrack)
+	    if (strongBacktrack && decisionLevel() - backtrack_level >= 100)
               cancelUntil(decisionLevel() - 1);
 	    else
               cancelUntil(backtrack_level);
