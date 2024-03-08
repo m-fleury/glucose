@@ -288,6 +288,7 @@ protected:
     uint32_t randomDescentAssignments;
     bool forceUnsatOnNewDescent;
     bool strongBacktrack;
+    uint32_t backtrackMinLevel;
     // Helper structures:
     //
     struct VarData { CRef reason; int level; CRef missed_implication; int missed_level; };

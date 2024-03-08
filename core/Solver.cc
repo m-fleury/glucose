@@ -170,6 +170,10 @@ static BoolOption opt_adapt(_cat, "adapt", "Adapt dynamically stategies after 10
 
 static BoolOption opt_forceunsat(_cat,"forceunsat","Force the phase for UNSAT",true);
 static BoolOption opt_strongbacktrack(_cat,"strongbt","Activate strong backtracking",false);
+static IntOption opt_backtrack_min_depth(_cat, "bt-min",
+                                                 "The minimum amount of levels before applying chronological backtracking",
+                                                 100, IntRange(0, INT32_MAX));
+			    
 //=================================================================================================
 // Constructor/Destructor:
 
@@ -223,6 +227,7 @@ verbosity(0)
 , randomDescentAssignments(0)
 , forceUnsatOnNewDescent(opt_forceunsat)
 , strongBacktrack (opt_strongbacktrack)
+, backtrackMinLevel(opt_backtrack_min_depth)
 
 , ok(true)
 , cla_inc(1)
@@ -1797,7 +1802,7 @@ lbool Solver::search(int nof_conflicts) {
             lbdQueue.push(nblevels);
             sumLBD += nblevels;
 
-	    if (strongBacktrack && decisionLevel() - backtrack_level >= 100)
+	    if (strongBacktrack && decisionLevel() - backtrack_level >= backtrackMinLevel)
               cancelUntil(decisionLevel() - 1);
 	    else
               cancelUntil(backtrack_level);
