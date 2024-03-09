@@ -761,7 +761,7 @@ Lit Solver::pickBranchLit() {
 |        rest of literals. There may be others from the same level though.
 |
 |________________________________________________________________________________________________@*/
-void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, int &out_btlevel, unsigned int &lbd, unsigned int &szWithoutSelectors) {
+void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, int &out_btlevel, unsigned int &lbd, unsigned int &szWithoutSelectors, Lit& forced, bool &forcing, CRef &rea) {
     int pathC = 0;
     Lit p = lit_Undef;
 
@@ -770,25 +770,92 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
         ASSERT(confl != CRef_Undef); // (otherwise should be UIP)
         Clause &c = ca[confl];
         int lev = 0;
-	int count = 0;
-        for (int i = 0; i < c.size(); ++i) {
+        const Lit lit = c[0];
+	const Lit orig_other = c[1];
+
+        Lit highest = c[0];
+        int highest_pos1 = 0;
+        lev = level (var (highest));
+        int levA = level(var(c[0]));
+        if (c.size() > 2) {
+          for (int i = 1; i < c.size(); ++i) {
             const Lit l = c[i];
             const Var x = var(l);
             const int x_lev = level(x);
-            if (x_lev > lev)
-              lev = x_lev, count = 0;
-	    if (x_lev == lev)
-	      ++count;
+            if (x_lev > lev) {
+              highest_pos1 = i;
+              lev = x_lev;
+              highest = l;
+            }
+          }
+          if (highest_pos1 >= 1) {
+            c[0] = highest;
+            c[highest_pos1] = lit;
+          }
+          levA = lev;
+          const Lit other = c[1];
+
+          int highest_pos2 = 1;
+          Lit highest2 = c[1];
+          lev = level(var(highest2));
+          for (int i = 2; i < c.size(); ++i) {
+            const Lit l = c[i];
+            const Var x = var(l);
+            const int x_lev = level(x);
+            if (x_lev > lev) {
+              highest_pos2 = i;
+              lev = x_lev;
+              highest2 = l;
+            }
+          }
+          if (highest_pos2 >= 2) {
+            c[1] = highest2;
+            c[highest_pos2] = other;
+          }
+          LOGCLAUSE(confl, "after swapping %d and %d; %d and %dfound", 0, highest_pos1, 1, highest_pos2);
+          if (highest_pos1 != 0 || highest_pos2 != 1) {
+            remove(watches[~lit], Watcher(confl, orig_other));
+            remove(watches[~orig_other], Watcher(confl, lit));
+            watches[~highest].push(Watcher(confl, highest2));
+            watches[~highest2].push(Watcher(confl, highest));
+          }
+        } else {
+	  const Lit other = c[1];
+	  if (level (var (lit)) < level (var (other))) {
+	    c[0] = other;
+	    c[1] = lit;
+	  }
+	  levA = level (var (c[0]));
+	}
+        if (!levA) {
+          LOGCLAUSE(confl, "found conflict at level 0: unsat");
+          cancelUntil(0);
+          return;
         }
-	LOG ("found %d literals on highest level", count);
-	ASSERT (strongBacktrack || lev);
-        if (!lev) {
-	  LOG ("found conflict at level 0: unsat");
-	  cancelUntil(0);
+        int levB = level (var (c[1]));
+        if (levA != levB) {
+	  LOG ("found var %d propagating", var (c[0]));
+	  forced = c[0];
+	  rea = confl;
+	  if (missed_implication(var (forced)) != CRef_Undef && missed_level(var (forced)) < levA) {
+	    LOGCLAUSE (missed_implication(var (forced)), "actually missed is better");
+	    lev = missed_level(var (forced));
+	    out_btlevel = lev;
+            rea = CRef_Undef;
+	    forced = ~c[0];
+	  } else {
+	    out_btlevel = lev - 1;
+	  }
+	  out_btlevel = lev - 1;
+	  forcing = true;
+	  cancelUntil (level (var (forced)) - 1);
+	  LOGCLAUSE (rea, "found forcing %d literal at level %d", var (forced), lev);
 	  return;
 	}
-	if (lev != decisionLevel ())
-	  cancelUntil (lev);
+	if (levA != decisionLevel ()) {
+	  LOG ("found out-of-order conflict, backtracking");
+	  cancelUntil (levA);
+	}
     }
 
     // Generate conflict clause:
@@ -886,6 +953,8 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
           confl = missed_implication(var(p));
         else
           confl = reason(var(p));
+        ASSERT (confl != CRef_Unit);
+        ASSERT (confl == CRef_Undef || !ca[confl].isMissed());
         seen[var(p)] = 0;
         pathC--;
 
@@ -1460,6 +1529,7 @@ CRef Solver::propagateUnaryWatches(Lit p) {
 
 
 void Solver::reduceDB() {
+  LOG ("reduction");
   for (int i = 0; i < trail.size(); ++i) {
     Var x = var (trail[i]);
     if (missed_implication(x) != CRef_Undef && missed_implication(x) != CRef_Unit) {
@@ -1763,7 +1833,8 @@ lbool Solver::search(int nof_conflicts) {
                        (int) stats[dec_vars] - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int) stats[clauses_literals],
                        (int) stats[nbReduceDB], nLearnts(), (int) stats[nbDL2], (int) stats[nbRemovedClauses], progressEstimate() * 100);
             }
-            if(decisionLevel() == 0) {
+            if (decisionLevel() == 0) {
+	      LOGCLAUSE (confl, "final conflict");
                 return l_False;
 
             }
@@ -1789,65 +1860,79 @@ lbool Solver::search(int nof_conflicts) {
             learnt_clause.clear();
             selectors.clear();
 
-            analyze(confl, learnt_clause, selectors, backtrack_level, nblevels, szWithoutSelectors);
+	    Lit forced;
+	    bool forcing = false;
+	    CRef rea = CRef_Undef;
+            analyze(confl, learnt_clause, selectors, backtrack_level, nblevels, szWithoutSelectors, forced, forcing, rea);
 	    CRef missed = missed_implication(var (learnt_clause[0]));
 	    int missed_lev = missed_level (var (learnt_clause[0]));
 	    vardata[var (learnt_clause[0])].missed_implication = CRef_Undef;
-            if(decisionLevel() == 0) {
+            if(decisionLevel() == 0 && !forcing) {
+  	        LOG("analyze led to conflict 0, so unsat");
   	        ASSERT (strongBacktrack);
                 return l_False;
             }
+            if (!forcing) {
+              stats[sumSizes] += learnt_clause.size();
+              lbdQueue.push(nblevels);
+              sumLBD += nblevels;
 
-            stats[sumSizes]+= learnt_clause.size();
-            lbdQueue.push(nblevels);
-            sumLBD += nblevels;
+              if (strongBacktrack &&
+                  decisionLevel() - backtrack_level >= backtrackMinLevel)
+                cancelUntil(decisionLevel() - 1);
+              else
+                cancelUntil(backtrack_level);
 
-	    if (strongBacktrack && decisionLevel() - backtrack_level >= backtrackMinLevel)
-              cancelUntil(decisionLevel() - 1);
-	    else
-              cancelUntil(backtrack_level);
-
-            if(certifiedUNSAT)
+              if (certifiedUNSAT)
                 addToDrat(learnt_clause, true);
 
-	    if (missed != CRef_Undef && missed_lev <= backtrack_level) {
-	      confl = missed;
-	    }
-
-            if(learnt_clause.size() == 1) {
-  	        LOG ("found unit");
-                uncheckedEnqueue(learnt_clause[0], strongBacktrack ? CRef_Unit : CRef_Undef);
+              if (missed != CRef_Undef && missed_lev <= backtrack_level) {
+                confl = missed;
+              }
+              if (learnt_clause.size() == 1) {
+                LOG("found unit");
+                uncheckedEnqueue(learnt_clause[0],
+                                 strongBacktrack ? CRef_Unit : CRef_Undef);
                 stats[nbUn]++;
                 parallelExportUnaryClause(learnt_clause[0]);
-            } else {
+              } else {
                 CRef cr;
-                if(chanseokStrategy && nblevels <= coLBDBound) {
-                    cr = ca.alloc(learnt_clause, false);
-                    permanentLearnts.push(cr);
-                    stats[nbPermanentLearnts]++;
+                if (chanseokStrategy && nblevels <= coLBDBound) {
+                  cr = ca.alloc(learnt_clause, false);
+                  permanentLearnts.push(cr);
+                  stats[nbPermanentLearnts]++;
                 } else {
-                    cr = ca.alloc(learnt_clause, true);
-                    ca[cr].setLBD(nblevels);
-                    ca[cr].setOneWatched(false);
-                    learnts.push(cr);
-                    claBumpActivity(ca[cr]);
+                  cr = ca.alloc(learnt_clause, true);
+		  ca[cr].setMissed(false);
+                  ca[cr].setLBD(nblevels);
+                  ca[cr].setOneWatched(false);
+                  learnts.push(cr);
+                  claBumpActivity(ca[cr]);
                 }
 #ifdef INCREMENTAL
                 ca[cr].setSizeWithoutSelectors(szWithoutSelectors);
 #endif
-                if(nblevels <= 2) { stats[nbDL2]++; } // stats
-                if(ca[cr].size() == 2) stats[nbBin]++; // stats
+                if (nblevels <= 2) {
+                  stats[nbDL2]++;
+                } // stats
+                if (ca[cr].size() == 2)
+                  stats[nbBin]++; // stats
                 attachClause(cr);
-                lastLearntClause = cr; // Use in multithread (to hard to put inside ParallelSolver)
-
+		ASSERT (!ca[cr].isMissed());
+                lastLearntClause = cr; // Use in multithread (to hard to put
+                                       // inside ParallelSolver)
 
                 parallelExportClauseDuringSearch(ca[cr]);
                 uncheckedEnqueue(learnt_clause[0], cr);
-
+              }
+              varDecayActivity();
+              claDecayActivity();
+            } else {
+              assert(strongBacktrack);
+	      if (value (forced) == l_Undef) // not set by missed implication
+		uncheckedEnqueue(forced, rea);
+	      confl = CRef_Undef;
             }
-            varDecayActivity();
-            claDecayActivity();
-
 
         } else {
             // Our dynamic restart, see the SAT09 competition compagnion paper
@@ -1873,6 +1958,7 @@ lbool Solver::search(int nof_conflicts) {
 
             // Simplify the set of problem clauses:
             if(decisionLevel() == 0 && !simplify()) {
+	      LOG("simplify led to conflict 0, so unsat");
                 return l_False;
             }
             // Perform clause database reduction !
