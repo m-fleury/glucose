@@ -162,7 +162,6 @@ class Clause {
       unsigned mark       : 2;
       unsigned learnt     : 1;
       unsigned canbedel   : 1;
-      unsigned ismissed   : 1;
       unsigned extra_size : 3; // extra size (end of 32bits) 0..3       
       unsigned seen       : 1;
       unsigned reloced    : 1;
@@ -194,7 +193,6 @@ class Clause {
         header.size      = ps.size();
 	header.lbd = 0;
 	header.canbedel = 1;
-	header.ismissed = 0;
 	header.exported = 0; 
 	header.oneWatched = 0;
     header.simplified = 0;
@@ -264,8 +262,6 @@ public:
     unsigned int        lbd    () const        { return header.lbd; }
     void setCanBeDel(bool b) {header.canbedel = b;}
     bool canBeDel() {return header.canbedel;}
-    void setMissed(bool b) {header.ismissed = b;}
-    bool isMissed() {return header.ismissed;}
     void setSeen(bool b) {header.seen = b;}
     bool getSeen() {return header.seen;}
     void setExported(unsigned int b) {header.exported = b;}

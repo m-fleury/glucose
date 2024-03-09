@@ -48,7 +48,7 @@ libr:	lib$(LIB)_release.a
 ## Link options
 $(EXEC):		LFLAGS += -g
 $(EXEC)_profile:	LFLAGS += -g -pg
-$(EXEC)_debug:		LFLAGS += -g -fsanitize=undefined -fsanitize=address
+$(EXEC)_debug:		LFLAGS += -g -fsanitize=undefined
 #$(EXEC)_release:	LFLAGS += ...
 $(EXEC)_static:		LFLAGS += --static
 

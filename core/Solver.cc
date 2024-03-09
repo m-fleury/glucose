@@ -746,7 +746,7 @@ Lit Solver::pickBranchLit() {
 
 /*_________________________________________________________________________________________________
 |
-|  analyze : (confl : Clause*) (out_learnt : vec<Lit>&) (out_btlevel : int&)  ->  [void]
+|  analyze : (confl : Clause*) (out_learnt : vec<Lit>&) (out_btlevel : int&) (forced : int &)  ->  [void]
 |
 |  Description:
 |    Analyze conflict and produce a reason clause.
@@ -954,7 +954,6 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
         else
           confl = reason(var(p));
         ASSERT (confl != CRef_Unit);
-        ASSERT (confl == CRef_Undef || !ca[confl].isMissed());
         seen[var(p)] = 0;
         pathC--;
 
@@ -1300,7 +1299,7 @@ CRef Solver::propagate() {
             // Make sure the false literal is data[1]:
             CRef cr = i->cref;
             Clause &c = ca[cr];
-	    LOGCLAUSE (cr, "checking clause for propagation");
+	    LOGCLAUSE (cr, "checking clause for propagation with blit var %d", var (blocker));
             assert(!c.getOneWatched());
             Lit false_lit = ~p;
             if(c[0] == false_lit)
@@ -1533,9 +1532,10 @@ void Solver::reduceDB() {
   for (int i = 0; i < trail.size(); ++i) {
     Var x = var (trail[i]);
     if (missed_implication(x) != CRef_Undef && missed_implication(x) != CRef_Unit) {
+      // if (!ca[missed_implication(x)].learnt())
+      // 	continue;
       LOGCLAUSE (missed_implication(x), "protecting missed reason");
-      ASSERT (!ca[missed_implication(x)].isMissed());
-      ca[missed_implication(x)].setMissed(true);
+      ca[missed_implication(x)].setCanBeDel(false);
     }
   }
     int i, j;
@@ -1567,7 +1567,7 @@ void Solver::reduceDB() {
 
     for(i = j = 0; i < learnts.size(); i++) {
         Clause &c = ca[learnts[i]];
-        if(c.lbd() > 2 && c.size() > 2 && c.canBeDel() && !c.isMissed() && !locked(c) && (i < limit)) {
+        if(c.lbd() > 2 && c.size() > 2 && c.canBeDel() && !locked(c) && (i < limit)) {
             //mostActiveClauses.push(learnts[i]);
             removeClause(learnts[i]);
             stats[nbRemovedClauses]++;
@@ -1584,9 +1584,10 @@ void Solver::reduceDB() {
   for (int i = 0; i < trail.size(); ++i) {
     Var x = var (trail[i]);
     if (missed_implication(x) != CRef_Undef && missed_implication(x) != CRef_Unit) {
+      // if (!ca[missed_implication(x)].learnt())
+      // 	continue;
+      ca[missed_implication(x)].setCanBeDel(true);
       LOGCLAUSE (missed_implication(x), "unprotecting missed reason");
-      ASSERT (ca[missed_implication(x)].isMissed());
-      ca[missed_implication(x)].setMissed(false);
     }
   }
   
@@ -1903,7 +1904,6 @@ lbool Solver::search(int nof_conflicts) {
                   stats[nbPermanentLearnts]++;
                 } else {
                   cr = ca.alloc(learnt_clause, true);
-		  ca[cr].setMissed(false);
                   ca[cr].setLBD(nblevels);
                   ca[cr].setOneWatched(false);
                   learnts.push(cr);
@@ -1918,7 +1918,6 @@ lbool Solver::search(int nof_conflicts) {
                 if (ca[cr].size() == 2)
                   stats[nbBin]++; // stats
                 attachClause(cr);
-		ASSERT (!ca[cr].isMissed());
                 lastLearntClause = cr; // Use in multithread (to hard to put
                                        // inside ParallelSolver)
 
