@@ -616,75 +616,67 @@ bool Solver::satisfied(const Clause &c) const {
 /******************************************************************
  * Minimisation with binary reolution
  ******************************************************************/
-void Solver::minimisationWithBinaryResolution(vec <Lit> &out_learnt) {
+void Solver::minimisationWithBinaryResolution(vec<Lit> &out_learnt) {
 
-    // Find the LBD measure
-    unsigned int lbd = computeLBD(out_learnt);
-    Lit p = ~out_learnt[0];
+  // Find the LBD measure
+  unsigned int lbd = computeLBD(out_learnt);
+  Lit p = ~out_learnt[0];
 
-    if(lbd <= lbLBDMinimizingClause) {
-        MYFLAG++;
+  if (lbd <= lbLBDMinimizingClause) {
+    MYFLAG++;
 
-        for(int i = 1; i < out_learnt.size(); i++) {
-            permDiff[var(out_learnt[i])] = MYFLAG;
-        }
-
-        vec <Watcher> &wbin = watchesBin[p];
-        int nb = 0;
-        for(int k = 0; k < wbin.size(); k++) {
-            Lit imp = wbin[k].blocker;
-            if(permDiff[var(imp)] == MYFLAG && value(imp) == l_True) {
-                nb++;
-                permDiff[var(imp)] = MYFLAG - 1;
-            }
-        }
-        int l = out_learnt.size() - 1;
-        if(nb > 0) {
-            stats[nbReducedClauses]++;
-            for(int i = 1; i < out_learnt.size() - nb; i++) {
-                if(permDiff[var(out_learnt[i])] != MYFLAG) {
-                    Lit p = out_learnt[l];
-                    out_learnt[l] = out_learnt[i];
-                    out_learnt[i] = p;
-                    l--;
-                    i--;
-                }
-            }
-
-            out_learnt.shrink(nb);
-
-        }
+    for (int i = 1; i < out_learnt.size(); i++) {
+      permDiff[var(out_learnt[i])] = MYFLAG;
     }
+
+    vec<Watcher> &wbin = watchesBin[p];
+    int nb = 0;
+    for (int k = 0; k < wbin.size(); k++) {
+      Lit imp = wbin[k].blocker;
+      if (permDiff[var(imp)] == MYFLAG && value(imp) == l_True) {
+        nb++;
+        permDiff[var(imp)] = MYFLAG - 1;
+      }
+    }
+    int l = out_learnt.size() - 1;
+    if (nb > 0) {
+      stats[nbReducedClauses]++;
+      for (int i = 1; i < out_learnt.size() - nb; i++) {
+        if (permDiff[var(out_learnt[i])] != MYFLAG) {
+          Lit p = out_learnt[l];
+          out_learnt[l] = out_learnt[i];
+          out_learnt[i] = p;
+          l--;
+          i--;
+        }
+      }
+
+      out_learnt.shrink(nb);
+    }
+  }
 }
 
 // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
 //
 
 void Solver::cancelUntil(int new_level) {
+  int dirty = trail.size();  
   if(decisionLevel() > new_level) {
+    vec<Lit> missed;
     LOG ("backtracking to level %d", new_level);
         int j = trail_lim[new_level];
         for (int c = trail_lim[new_level];
              c != trail.size(); ++c) {
-            Lit l = trail[c];
-            Var x = var(l);
-            ASSERT(level(x) >= new_level || !level (x));
-	    if (!level (x)) {
-	      LOG ("reassigning %s%d", sign (l) ? "" : "-", x);
-                trail[j++] = l;
-	    } else if (missed_implication(x) != CRef_Undef && missed_level(x) <= new_level) {
-    	        LOGCLAUSE (missed_implication(x), "reassigning %s%d due to missed on target level %d", sign (l) ? "" : "-", x, missed_level(x));
-	        ASSERT (strongBacktrack);
-                trail[j++] = l;
-		if (missed_level(x) == new_level) {
-                  vardata[x] = mkVarData(new_level ? missed_implication(x) : CRef_Undef, new_level);
-		}
-		else {
-                  vardata[x] = mkVarData(missed_implication(x), new_level,
-					 missed_implication(x), missed_level(x));
-		}
-            } else {
-                LOG ("unassigning var %d", x);
+            const Lit l = trail[c];
+            const Var x = var(l);
+	    const int lev = level(x);
+	    if (missed_implication(x) != CRef_Undef && lev > new_level && missed_level(x) <= new_level) {
+	      LOG ("found missed lit %d @ %d @@ %d", var (l), lev, missed_level(x));
+	      missed.push (l);
+	      
+	    } else if (lev > new_level) {
+	      // unassign
+	        LOG ("unassigning lit %d @ %d", var (l), lev);
                 assigns[x] = l_Undef;
 	        vardata[x].missed_implication = CRef_Undef;
                 if (phase_saving > 1 ||
@@ -692,12 +684,66 @@ void Solver::cancelUntil(int new_level) {
                     polarity[x] = sign(trail[c]);
                 }
                 insertVarOrder(x);
-            }
-        }
-	ASSERT (strongBacktrack || j == trail_lim[new_level]);
-        qhead = trail_lim[new_level];
+	    } else { // keep
+	      LOG ("keeping lit %d @ %d", var (l), lev);
+	      trail[j++] = l;
+	      if (vardata[x].dirty && dirty >= j - 1)
+		dirty = j-1;
+	    }
+	}
+
+        if (dirty == trail.size()) {
+	  qhead = j;
+	} else {
+	  qhead = dirty;
+	}
         trail.shrink(trail.size() - j);
-        trail_lim.shrink(trail_lim.size() - new_level);
+	for (int i = 0; i < missed.size(); ++i) {
+	  const Lit l = missed[i];
+	  const Var x = var (l);
+	  LOGCLAUSE (vardata[x].missed_implication, "missed lit %d @ %d", var (l), missed_level (x));
+	  assert (missed_implication(x) != CRef_Undef);
+	  vardata[x].reason = vardata[x].missed_implication;
+	  vardata[x].level = vardata[x].missed_level;
+	  vardata[x].missed_implication = CRef_Undef;
+	  trail.push(l);
+	  if (!vardata[x].level && false) {
+	    if (certifiedUNSAT) {
+	      vec <Lit> learnt_unit; learnt_unit.push(l);
+              addToDrat(learnt_unit, true);
+	    }
+	  }
+        }
+        
+  //           ASSERT(level(x) >= new_level || !level (x));
+	  
+  // 	    if (!level (x)) {
+  // 	      LOG ("reassigning %s%d", sign (l) ? "" : "-", x);
+  //               trail[j++] = l;
+  // 	    } else if (missed_implication(x) != CRef_Undef && missed_level(x) <= new_level) {
+  //   	        LOGCLAUSE (missed_implication(x), "reassigning %s%d due to missed on target level %d", sign (l) ? "" : "-", x, missed_level(x));
+  // 	        ASSERT (strongBacktrack);
+  //               trail[j++] = l;
+  // 		if (missed_level(x) == new_level) {
+  //                 vardata[x] = mkVarData(new_level ? missed_implication(x) : CRef_Undef, new_level);
+  // 		}
+  // 		else {
+  //                 vardata[x] = mkVarData(missed_implication(x), new_level,
+  // 					 missed_implication(x), missed_level(x));
+  // 		}
+  //           } else {
+  //               LOG ("unassigning var %d", x);
+  //               assigns[x] = l_Undef;
+  // 	        vardata[x].missed_implication = CRef_Undef;
+  //               if (phase_saving > 1 ||
+  //                   ((phase_saving == 1) && c > trail_lim.last())) {
+  //                   polarity[x] = sign(trail[c]);
+  //               }
+  //               insertVarOrder(x);
+  //           }
+  //       }
+        ASSERT(strongBacktrack || j == trail_lim[new_level]);
+	trail_lim.shrink(trail_lim.size() - new_level);
   }
 }
 
@@ -942,14 +988,19 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
 
 	LOG ("open = %d ", pathC);
         // Select next clause to look at:
-        while (!seen[var(trail[index--])]) {
-	  LOG ("skipping over var %d", var (trail [index + 1]));
-	};
+        Lit uip;
+	do {
+	  ASSERT (index >= 0);
+	  uip = trail [index--];
+	  LOG ("skipping over var %d@%d", var (uip), level (var (uip)));
+	}
+        while (!seen[var(uip)] || level (var (uip)) != decisionLevel());
         p = trail[index + 1];
+	ASSERT (level (var (p)) == decisionLevel());
       	LOG ("resolving on %s%d", sign (p) ? "+" : "-", var (p));
         //stats[sumRes]++;
-        if (missed_implication(var(p)) != CRef_Undef &&
-            missed_implication(var(p)) != CRef_Unit)
+	ASSERT (missed_implication(var(p)) != CRef_Unit);
+        if (missed_implication(var(p)) != CRef_Undef)
           confl = missed_implication(var(p));
         else
           confl = reason(var(p));
@@ -959,11 +1010,15 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
 
         if (!pathC && missed_implication(var(p)) != CRef_Undef && missed_level(var (p)) &&
             out_learnt.size() != 1) {
-	  LOGCLAUSE (missed_implication(var (p)), "could resolve with ");
+	  LOGCLAUSE (missed_implication(var (p)), "could resolve with");
           out_learnt[0] = ~p;
           out_learnt.copyTo(analyze_toclear);
           out_learnt.clear();
           out_learnt.push(); // make space again
+	  Clause&c = ca[missed_implication(var (p))];
+	  const Lit other = (p == c[0]) ? c[1] : c[0];
+	  c[0] = p;
+	  c[1] = other;
           for (int j = 0; j < analyze_toclear.size(); j++)
                 seen[var(analyze_toclear[j])] = 0;
           int highest_level = 0;
@@ -972,7 +1027,6 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
                 if (lev > highest_level)
                     highest_level = lev;
           }
-	  const Clause&c = ca[missed_implication(var (p))];
           for (int i = 1; i < c.size(); ++i) {
             const int lev = level(var(c[i]));
 	    analyze_toclear.push (c[i]);
@@ -981,19 +1035,18 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
           }
           ASSERT(highest_level < decisionLevel());
           confl = missed_implication(var(p));
+	  LOG ("changing to highest_level %d", highest_level);
           cancelUntil(highest_level);
-	  // printf ("c conflict: ");
-          // for (int i = 0; i < analyze_toclear.size(); ++i) {
-	  //   printf (" %d", var (analyze_toclear[i]));
-          // }
 	  if (!highest_level) {
 	    LOG ("problem is unsat");
 	    return;
 	  }
 	  // printf("\n");
           pathC = 0; // UIP is on highest level
+	  LOG ("starting with uip: %d", var (analyze_toclear[0]));
           for (int i = 1; i < analyze_toclear.size(); ++i) {
                 Lit l = analyze_toclear[i];
+		LOG ("analyzing %d", var (l));
                 const int lev = level(var(l));
 		if (!lev || missed_implication(var (l)) == CRef_Unit)
 		  continue;
@@ -1010,6 +1063,7 @@ void Solver::analyze(CRef confl, vec <Lit> &out_learnt, vec <Lit> &selectors, in
           }
 	  analyze_toclear.clear();
 	  lastDecisionLevel.clear();
+	  index = trail.size() - 1;
         }
 
     } while(pathC > 0);
@@ -1201,8 +1255,6 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     trail.push_(p);
     if (from == CRef_Unit) {
       vardata[var (p)].level = 0;
-      vardata[var (p)].missed_level = 0;
-      vardata[var (p)].missed_implication = from;
       vardata[var (p)].reason = CRef_Undef;
       return;
     }
@@ -1213,15 +1265,16 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
       assert (c.size() == 2 || p == c[0]);
       assert (c[1] == p || c[0] == p);
       assert (l != p);
-      if (level (var (l)) != decisionLevel()) {
-	LOG("found out-of-order %s%d @ %d", sign (p) ? "" : "-", var (p), level (var (l)));
-	vardata[var (p)].missed_level = level (var (l));
-	vardata[var (p)].missed_implication = from;
-      } else {
-	LOG("assignement of  %s%d is on current level", sign (p) ? "" : "-", var (p));
-      }
+      vardata[var (p)].level = level (var (l));
       for (int i = 0; i < c.size(); ++i)
         ASSERT (c[i] == p || value (c[i])== l_False);
+      LOG ("final level is %d", vardata[var (p)].level);
+      if (!vardata[var (p)].level && false) {
+	    if (certifiedUNSAT) {
+	      vec <Lit> learnt_unit; learnt_unit.push(l);
+              addToDrat(learnt_unit, true);
+	    }
+      }
     }
 
 }
@@ -1865,14 +1918,14 @@ lbool Solver::search(int nof_conflicts) {
 	    bool forcing = false;
 	    CRef rea = CRef_Undef;
             analyze(confl, learnt_clause, selectors, backtrack_level, nblevels, szWithoutSelectors, forced, forcing, rea);
-	    CRef missed = missed_implication(var (learnt_clause[0]));
-	    int missed_lev = missed_level (var (learnt_clause[0]));
-	    vardata[var (learnt_clause[0])].missed_implication = CRef_Undef;
             if(decisionLevel() == 0 && !forcing) {
   	        LOG("analyze led to conflict 0, so unsat");
   	        ASSERT (strongBacktrack);
                 return l_False;
             }
+	    CRef missed = missed_implication(var (learnt_clause[0]));
+	    int missed_lev = missed_level (var (learnt_clause[0]));
+	    vardata[var (learnt_clause[0])].missed_implication = CRef_Undef;
             if (!forcing) {
               stats[sumSizes] += learnt_clause.size();
               lbdQueue.push(nblevels);
@@ -1892,8 +1945,11 @@ lbool Solver::search(int nof_conflicts) {
               }
               if (learnt_clause.size() == 1) {
                 LOG("found unit");
-                uncheckedEnqueue(learnt_clause[0],
-                                 strongBacktrack ? CRef_Unit : CRef_Undef);
+		if (value(learnt_clause[0]) != l_Undef && reason(var (learnt_clause[0])) != CRef_Undef) {
+		  LOGCLAUSE (reason(var (learnt_clause[0])), "re-cancel");
+		  cancelUntil(level(var (learnt_clause[0])) - 1);
+		}
+                uncheckedEnqueue(learnt_clause[0], CRef_Unit);
                 stats[nbUn]++;
                 parallelExportUnaryClause(learnt_clause[0]);
               } else {

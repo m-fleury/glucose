@@ -291,9 +291,9 @@ protected:
     uint32_t backtrackMinLevel;
     // Helper structures:
     //
-    struct VarData { CRef reason; int level; CRef missed_implication; int missed_level; };
-    static inline VarData mkVarData(CRef cr, int l, CRef missed, int missed_lev){ VarData d = {cr, l, missed, missed_lev}; return d; }
-  static inline VarData mkVarData(CRef cr, int l){ VarData d = {cr, l, CRef_Undef, 0}; return d; }
+  struct VarData { CRef reason; int level; CRef missed_implication; int missed_level; bool dirty;};
+  static inline VarData mkVarData(CRef cr, int l, CRef missed, int missed_lev){ VarData d = {cr, l, missed, missed_lev, true}; return d; }
+  static inline VarData mkVarData(CRef cr, int l){ VarData d = {cr, l, CRef_Undef, 0, true}; return d; }
   inline bool isValidBlocker(Lit l, int propLevel) {
     if (!strongBacktrack)
       return true;
