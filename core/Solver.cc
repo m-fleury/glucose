@@ -1474,7 +1474,8 @@ CRef Solver::propagate() {
             confl = propagateUnaryWatches(p);
 
         }
-
+        if (confl == CRef_Undef)
+	  vardata[var (p)].dirty = false;
     }
 
 
