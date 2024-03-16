@@ -1924,10 +1924,10 @@ lbool Solver::search(int nof_conflicts) {
   	        ASSERT (strongBacktrack);
                 return l_False;
             }
-	    CRef missed = missed_implication(var (learnt_clause[0]));
-	    int missed_lev = missed_level (var (learnt_clause[0]));
-	    vardata[var (learnt_clause[0])].missed_implication = CRef_Undef;
             if (!forcing) {
+              CRef missed = missed_implication(var(learnt_clause[0]));
+              int missed_lev = missed_level(var(learnt_clause[0]));
+              vardata[var(learnt_clause[0])].missed_implication = CRef_Undef;
               stats[sumSizes] += learnt_clause.size();
               lbdQueue.push(nblevels);
               sumLBD += nblevels;
