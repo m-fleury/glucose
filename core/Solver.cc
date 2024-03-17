@@ -1414,11 +1414,20 @@ CRef Solver::propagate() {
 #endif
             if (strongBacktrack && value (first) == l_True) {
 	      if (!highest_pos) {
-	        LOG ("keeping clause in WL of %d", var (false_lit));
+	        LOG("keeping clause in WL of %d (other watched true, RL: %d, missed: %d)", var (false_lit), replacement_level, missed_level(var (first)));
                 *j++ = w;
-		goto NextClause;
+                Var x = var(first);
+                const bool replacing_missed =
+                    missed_implication(x) == CRef_Undef ||
+                    missed_level(x) > replacement_level;
+                if (replacing_missed) {
+                  vardata[x].missed_implication = cr;
+                  vardata[x].missed_level = replacement_level;
+                  LOG("found missed %s%d", sign(first) ? "+" : "-", var(first));
+                }
+                goto NextClause;
 	      }
-	      Lit l = c[highest_pos];
+              Lit l = c[highest_pos];
 	      c[highest_pos] = false_lit;
 	      c[0] = first;
 	      c[1] = l;
@@ -1427,7 +1436,7 @@ CRef Solver::propagate() {
 	      ASSERT (~c[1] != false_lit);
               watches[~c[1]].push(w);
 	      Var x = var (l);
-	      const bool replacing_missed = !missed_implication(x) || missed_level (x) > replacement_level;
+	      const bool replacing_missed = missed_implication(x) == CRef_Undef || missed_level (x) > replacement_level;
 	      if (level (var (l)) > replacement_level && replacing_missed) {
 		vardata[x].missed_implication = cr;
 		vardata[x].missed_level = replacement_level;
@@ -1437,7 +1446,7 @@ CRef Solver::propagate() {
 	    }
             // Did not find watch -- clause is unit under assignment:
             if(value(first) == l_False) {
-	        LOG ("keeping clause in WL of %d", var (false_lit));
+	        LOG ("keeping clause in WL of %d (conflict)", var (false_lit));
                 *j++ = w;
                 confl = cr;
                 qhead = trail.size();
@@ -1458,7 +1467,7 @@ CRef Solver::propagate() {
 		  uncheckedEnqueue(first, cr);
 		  goto NextClause;
 		}
-	        LOG ("keeping clause in WL of %d", var (false_lit));
+  	        LOG ("keeping clause in WL of %d (propagation)", var (false_lit));
 		*j++ = w;
                 uncheckedEnqueue(first, cr);
             }
