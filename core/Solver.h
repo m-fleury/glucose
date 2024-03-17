@@ -302,7 +302,7 @@ protected:
     CRef missed = missed_implication(x);
     int blit_missed_level = missed_level(x);
     return blit_lev <= propLevel ||
-           (missed != CRef_Undef && blit_missed_level > propLevel);
+           (missed != CRef_Undef && blit_missed_level <= propLevel);
   }
 
     struct Watcher {

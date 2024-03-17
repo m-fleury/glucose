@@ -686,9 +686,9 @@ void Solver::cancelUntil(int new_level) {
                 insertVarOrder(x);
 	    } else { // keep
 	      LOG ("keeping lit %d @ %d", var (l), lev);
+	      if (vardata[x].dirty && dirty == trail.size())
+		dirty = j;
 	      trail[j++] = l;
-	      if (vardata[x].dirty && dirty >= j - 1)
-		dirty = j-1;
 	    }
 	}
 
@@ -698,6 +698,8 @@ void Solver::cancelUntil(int new_level) {
 	  qhead = dirty;
 	}
         trail.shrink(trail.size() - j);
+        assert (qhead <= trail.size());
+        assert (qhead >= 0);
 	for (int i = 0; i < missed.size(); ++i) {
 	  const Lit l = missed[i];
 	  const Var x = var (l);
@@ -706,13 +708,8 @@ void Solver::cancelUntil(int new_level) {
 	  vardata[x].reason = vardata[x].missed_implication;
 	  vardata[x].level = vardata[x].missed_level;
 	  vardata[x].missed_implication = CRef_Undef;
+	  vardata[x].dirty = true;
 	  trail.push(l);
-	  if (!vardata[x].level && false) {
-	    if (certifiedUNSAT) {
-	      vec <Lit> learnt_unit; learnt_unit.push(l);
-              addToDrat(learnt_unit, true);
-	    }
-	  }
         }
         
   //           ASSERT(level(x) >= new_level || !level (x));
@@ -1252,6 +1249,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     assert(value(p) == l_Undef);
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel());
+    vardata[var(p)].dirty = true;
     trail.push_(p);
     if (from == CRef_Unit) {
       vardata[var (p)].level = 0;
@@ -1269,12 +1267,6 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
       for (int i = 0; i < c.size(); ++i)
         ASSERT (c[i] == p || value (c[i])== l_False);
       LOG ("final level is %d", vardata[var (p)].level);
-      if (!vardata[var (p)].level && false) {
-	    if (certifiedUNSAT) {
-	      vec <Lit> learnt_unit; learnt_unit.push(l);
-              addToDrat(learnt_unit, true);
-	    }
-      }
     }
 
 }
